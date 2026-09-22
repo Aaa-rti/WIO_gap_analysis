@@ -4,7 +4,6 @@
 # Produces TWO versions:
 #
 #   1. RAW Gini coefficient
-#      - consistent with previous WIO gini.wtd() analysis
 #
 #   2. NORMALISED Gini coefficient
 #      - finite-sample correction:
@@ -15,9 +14,6 @@
 #   y     = sovereign state
 #   fill  = Gini coefficient
 #   size  = total number of MPAs
-#
-# Comoros labels are placed above the bubbles because the
-# small number of MPAs produces very small circles.
 # ============================================================
 
 
@@ -156,15 +152,13 @@ gini_plot_data <-
   ) |>
   
   dplyr::mutate(
-    
-    # Standardise country name
+
     sovereign_state =
       dplyr::recode(
         sovereign_state,
         "Comoro Islands" = "Comoros"
       ),
     
-    # Labels matching previous figure
     indicator =
       dplyr::recode(
         indicator,
@@ -182,7 +176,6 @@ gini_plot_data <-
         levels = country_order
       ),
     
-    # Indicator order
     indicator =
       factor(
         indicator,
@@ -207,26 +200,13 @@ print(
 # ============================================================
 # 8. PLOTTING FUNCTION
 # ============================================================
-#
-# This function makes the two figures identical except for the
-# Gini variable supplied:
-#
-#   gini_raw
-#   gini_normalised
-#
-# Keeping everything else identical makes the comparison
-# between the two formulations straightforward.
-# ============================================================
+
 
 make_gini_plot <- function(
     data,
     gini_variable,
     plot_title = NULL) {
   
-  
-  # ----------------------------------------------------------
-  # Pull selected Gini column into a common plotting variable
-  # ----------------------------------------------------------
   
   plot_data <-
     data |>
@@ -235,7 +215,7 @@ make_gini_plot <- function(
       gini_value =
         .data[[gini_variable]],
       
-      # Label to two decimal places
+
       gini_label =
         dplyr::if_else(
           is.na(gini_value),
@@ -248,12 +228,6 @@ make_gini_plot <- function(
     )
   
   
-  # ----------------------------------------------------------
-  # Split labels into:
-  #
-  # 1. All countries except Comoros -> inside bubble
-  # 2. Comoros -> above bubble
-  # ----------------------------------------------------------
   
   label_inside <-
     plot_data |>
@@ -270,10 +244,7 @@ make_gini_plot <- function(
         "Comoros"
     )
   
-  
-  # ----------------------------------------------------------
-  # Plot
-  # ----------------------------------------------------------
+
   
   p <-
     ggplot2::ggplot(
@@ -284,9 +255,7 @@ make_gini_plot <- function(
       )
     ) +
     
-    # --------------------------------------------------------
-  # Bubbles
-  # --------------------------------------------------------
+
   
   ggplot2::geom_point(
     ggplot2::aes(
@@ -299,12 +268,7 @@ make_gini_plot <- function(
   ) +
     
     
-    # --------------------------------------------------------
-  # Labels INSIDE bubbles
-  #
-  # Slightly smaller than previous version.
-  # --------------------------------------------------------
-  
+
   ggplot2::geom_text(
     data =
       label_inside,
@@ -321,12 +285,7 @@ make_gini_plot <- function(
   ) +
     
     
-    # --------------------------------------------------------
-  # COMOROS labels
-  #
-  # Place just above each small bubble.
-  # --------------------------------------------------------
-  
+
   ggplot2::geom_text(
     data =
       label_comoros,
@@ -349,21 +308,12 @@ make_gini_plot <- function(
   ) +
     
     
-    # --------------------------------------------------------
-  # Bubble size
-  # --------------------------------------------------------
-  
+
   ggplot2::scale_size_area(
     max_size = 22
   ) +
     
     
-    # --------------------------------------------------------
-  # Gini fill
-  #
-  # Fixed 0–1 scale for BOTH plots so colours mean the
-  # same thing in the raw and normalised versions.
-  # --------------------------------------------------------
   
   ggplot2::scale_fill_viridis_c(
     option = "E",
@@ -391,10 +341,6 @@ make_gini_plot <- function(
   ) +
     
     
-    # --------------------------------------------------------
-  # Add some extra space above Comoros so its labels
-  # don't get clipped.
-  # --------------------------------------------------------
   
   ggplot2::scale_y_discrete(
     expand =
@@ -407,9 +353,6 @@ make_gini_plot <- function(
   ) +
     
     
-    # --------------------------------------------------------
-  # Legends
-  # --------------------------------------------------------
   
   ggplot2::guides(
     
@@ -440,9 +383,7 @@ make_gini_plot <- function(
   ) +
     
     
-    # --------------------------------------------------------
-  # Labels
-  # --------------------------------------------------------
+
   
   ggplot2::labs(
     title = plot_title,
@@ -451,9 +392,7 @@ make_gini_plot <- function(
   ) +
     
     
-    # --------------------------------------------------------
-  # Theme
-  # --------------------------------------------------------
+
   
   ggplot2::theme_minimal(
     base_size = 16
@@ -461,9 +400,7 @@ make_gini_plot <- function(
     
     ggplot2::theme(
       
-      # ------------------------------------------------------
-      # Legend
-      # ------------------------------------------------------
+
       
       legend.position =
         "top",
@@ -475,11 +412,7 @@ make_gini_plot <- function(
         ggplot2::margin(
           b = 15
         ),
-      
-      
-      # ------------------------------------------------------
-      # Grid
-      # ------------------------------------------------------
+  
       
       panel.grid.minor =
         ggplot2::element_blank(),
@@ -491,9 +424,6 @@ make_gini_plot <- function(
         ),
       
       
-      # ------------------------------------------------------
-      # Countries
-      # ------------------------------------------------------
       
       axis.text.y =
         ggplot2::element_text(
@@ -506,9 +436,7 @@ make_gini_plot <- function(
         ),
       
       
-      # ------------------------------------------------------
-      # Habitats
-      # ------------------------------------------------------
+
       
       axis.text.x =
         ggplot2::element_text(
@@ -525,9 +453,7 @@ make_gini_plot <- function(
         ggplot2::element_blank(),
       
       
-      # ------------------------------------------------------
-      # Optional title
-      # ------------------------------------------------------
+
       
       plot.title =
         ggplot2::element_text(
@@ -537,9 +463,7 @@ make_gini_plot <- function(
         ),
       
       
-      # ------------------------------------------------------
-      # Outer spacing
-      # ------------------------------------------------------
+
       
       plot.margin =
         ggplot2::margin(
