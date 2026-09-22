@@ -177,14 +177,14 @@ indicator_inputs <- tibble::tribble(
   # "area",
   # NA_character_,
   
-  "indicators/wio_coral_allen_wcmc/wio_coral_allen_wcmc.shp", #MAINA CHANGE THIS ONCE YOU'VE GOT THE CORAL LAYER
+  "indicators/wio_coral_allen_wcmc/wio_coral_allen_wcmc.shp", 
   NA_character_,
   "Coral",
   "auto",
   "area",
   NA_character_,
 
-  "indicators/GlobalSeagrass2023_2024/GlobalSeagrass2023_2024_WIO_EEZmasked.tif",    #MAINA CHANGE THIS ONCE SEAGRASS TIFF HAS BEEN DOWNLOADED
+  "indicators/GlobalSeagrass2023_2024/GlobalSeagrass2023_2024_WIO_EEZmasked.tif",   
   NA_character_,
   "Seagrass",
   "raster",
