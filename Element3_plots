@@ -1,0 +1,114 @@
+# Element 3 plots
+# -----------------------------------------------------------------------------
+
+wio_data <- element3 |>
+  filter(sovereign_state == "WIO", indicator %in% indicator_levels) |>
+  mutate(
+    value = as.numeric(.data[[value_column]]),
+    indicator = factor(indicator, levels = rev(indicator_levels))
+  ) |>
+  filter(!is.na(value))
+
+wio_summary_plot <- ggplot(
+  wio_data,
+  aes(x = value, y = indicator, fill = indicator)
+) +
+  geom_col(width = 0.72, colour = NA) +
+  scale_fill_manual(values = indicator_colours, guide = "none") +
+  scale_x_continuous(
+    position = "top",
+    breaks = wio_x_breaks,
+    labels = function(x) paste0(x, "%"),
+    expand = c(0, 0)
+  ) +
+  scale_y_discrete(labels = NULL, expand = expansion(add = 0.25)) +
+  coord_cartesian(xlim = c(0, wio_x_max), clip = "on") +
+  labs(title = "Total % protected in WIO", x = NULL, y = "Indicator") +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_text(
+      face = "bold", size = 13, margin = margin(r = 8)
+    ),
+    axis.text.x = element_text(size = 10, face = "bold", colour = "#444444"),
+    axis.ticks.x = element_line(colour = "#444444"),
+    plot.title = element_text(
+      face = "bold", hjust = 0.5, size = 14, margin = margin(b = 8)
+    ),
+    plot.margin = margin(8, 10, 2, 5)
+  )
+
+# Custom legend used in the combined figure.
+legend_data <- tibble(
+  indicator = factor(indicator_levels, levels = indicator_levels),
+  label = unname(indicator_labels[indicator_levels]),
+  y = rev(seq_along(indicator_levels))
+)
+
+legend_panel <- ggplot(legend_data) +
+  geom_point(
+    aes(x = 0.035, y = y, fill = indicator),
+    shape = 22,
+    size = 9,
+    stroke = 0,
+    colour = NA
+  ) +
+  geom_text(
+    aes(x = 0.095, y = y, label = label),
+    hjust = 0,
+    vjust = 0.5,
+    size = 4.8,
+    colour = "#111111"
+  ) +
+  scale_fill_manual(values = indicator_colours, guide = "none") +
+  scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  scale_y_continuous(
+    limits = c(0.3, length(indicator_levels) + 0.8),
+    expand = c(0, 0)
+  ) +
+  coord_cartesian(clip = "off") +
+  labs(title = "Element 3 indicators") +
+  theme_void() +
+  theme(
+    plot.title = element_text(
+      face = "bold", hjust = 0, size = 14, margin = margin(b = 6)
+    ),
+    plot.margin = margin(2, 5, 5, 20)
+  )
+
+circle_for_combined <- element3_circular_plot +
+  theme(legend.position = "none", plot.margin = margin(0, 0, 0, 0))
+
+left_column <- (wio_summary_plot / legend_panel) +
+  plot_layout(heights = c(1.20, 0.80))
+
+combined_plot <- (left_column | circle_for_combined) +
+  plot_layout(widths = c(1, 1))
+
+print(combined_plot)
+
+ggsave(
+  file.path(output_dir, "element3_reference_style_WIO_summary_and_circular.png"),
+  combined_plot,
+  width = combined_width,
+  height = combined_height,
+  dpi = 400,
+  bg = "white"
+)
+
+# -----------------------------------------------------------------------------
+# Export figure data
+# -----------------------------------------------------------------------------
+
+write_csv(
+  select(plot_data, sovereign_state, indicator, value, bar_id),
+  file.path(output_dir, "element3_reference_style_circular_plot_data.csv")
+)
+
+write_csv(
+  select(wio_indicator_rank, indicator, wio_value),
+  file.path(output_dir, "element3_WIO_indicator_order_least_to_most.csv")
+)
