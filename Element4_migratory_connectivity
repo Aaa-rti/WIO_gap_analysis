@@ -1,0 +1,1204 @@
+# ============================================================
+# ELEMENT 4 — WIO representativeness of migratory connectivity
+# ============================================================
+#
+# Workflow:
+#   MiCO routes/connections -> unique documented connections
+#   -> regular grid connectivity scores
+#   -> MPA/OECM representation by sovereign EEZ
+#
+# Analytical decisions:
+#   - `source` and `target` are used as connection endpoint IDs.
+#   - Duplicate records describing the same species-specific connection
+#     are collapsed to one unique documented connection.
+#   - MiCO links are generalised connections between metasites rather
+#     than fine-scale animal tracks; connectivity is therefore scored
+#     at the grid-cell level.
+#   - All cells containing documented connectivity are retained; no
+#     quantile threshold is applied.
+#   - E4 combines unique connections (C) and species richness (S):
+#
+#         E4_i = 0.5 * C*_i + 0.5 * S*_i
+#
+#     where C* and S* are WIO-wide 0–1 scaled components.
+# ============================================================
+
+
+# 1. Packages -------------------------------------------------------------
+
+library(sf)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(stringr)
+library(readr)
+library(lwgeom)
+library(units)
+
+sf_use_s2(FALSE)
+
+
+# 2. Settings -------------------------------------------------------------
+
+# MiCO crossing data
+MICO_CSV <- "indicators/marine_migration/mico_metasites_crossing_oceans_all.csv"
+
+SPECIES_FIELD <- "species_code"
+SOURCE_FIELD  <- "source"
+TARGET_FIELD  <- "target"
+START_X_FIELD <- "start_x"
+START_Y_FIELD <- "start_y"
+END_X_FIELD   <- "end_x"
+END_Y_FIELD   <- "end_y"
+TYPE_FIELD    <- "type"
+
+TYPE_VALUES <- c("METAROUTE", "METACONNECTION")
+MICO_COORD_CRS <- 4326
+
+# Element 1 protection database
+PROTECTION_GPKG <- "outputs/wio_protected_area_spatial_database.gpkg"
+
+EEZ_LAYER  <- "eez_by_country"
+MPA_LAYER  <- "mpa_unique_by_country"
+OECM_LAYER <- "oecm_unique_by_country"
+
+EXCLUDED_SOVEREIGN_STATES <- "Disputed"
+
+
+GRID_SIZE_KM <- 50
+
+GEODESIC_SEGMENT_KM <- 25
+
+USE_LOG_SCALING <- TRUE
+
+E4_WEIGHTS <- c(
+  connections = 0.5,
+  species = 0.5
+)
+E4_WEIGHTS <- E4_WEIGHTS / sum(E4_WEIGHTS)
+
+
+OUT_DIR <- file.path(
+  "outputs",
+  "element4",
+  paste0("mico_grid_", GRID_SIZE_KM, "km")
+)
+
+dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+OUT_GPKG <- file.path(
+  OUT_DIR,
+  paste0("element4_mico_connectivity_", GRID_SIZE_KM, "km.gpkg")
+)
+
+if (file.exists(OUT_GPKG)) {
+  unlink(OUT_GPKG)
+}
+
+
+# 3. Helper functions -----------------------------------------------------
+
+safe_divide <- function(num, den) {
+  ifelse(!is.na(den) & den > 0, num / den, NA_real_)
+}
+
+sf_area_km2 <- function(x) {
+  as.numeric(st_area(x)) / 1e6
+}
+
+normalise_sovereign_name <- function(x) {
+  x |>
+    as.character() |>
+    str_squish() |>
+    str_to_lower()
+}
+
+exclude_sovereign_states <- function(x, sovereign_col = "sovereign_state") {
+  excluded <- normalise_sovereign_name(EXCLUDED_SOVEREIGN_STATES)
+  state <- normalise_sovereign_name(x[[sovereign_col]])
+  x[!state %in% excluded, , drop = FALSE]
+}
+
+make_valid_polygonal <- function(x) {
+  if (nrow(x) == 0) {
+    return(x)
+  }
+
+  x <- suppressWarnings(st_make_valid(x))
+  x <- x[!st_is_empty(x), , drop = FALSE]
+
+  if (nrow(x) == 0) {
+    return(x)
+  }
+
+  geometry_type <- as.character(st_geometry_type(x, by_geometry = TRUE))
+
+  if (any(geometry_type %in% c("GEOMETRY", "GEOMETRYCOLLECTION"))) {
+    x <- suppressWarnings(
+      st_collection_extract(x, "POLYGON", warn = FALSE)
+    )
+  }
+
+  x <- x[!st_is_empty(x), , drop = FALSE]
+  geometry_type <- as.character(st_geometry_type(x, by_geometry = TRUE))
+
+  x[
+    geometry_type %in% c("POLYGON", "MULTIPOLYGON"),
+    ,
+    drop = FALSE
+  ]
+}
+
+extract_lineal <- function(x) {
+  if (nrow(x) == 0) {
+    return(x)
+  }
+
+  x <- x[!st_is_empty(x), , drop = FALSE]
+  geometry_type <- as.character(st_geometry_type(x, by_geometry = TRUE))
+
+  line_rows <- geometry_type %in% c("LINESTRING", "MULTILINESTRING")
+  collection_rows <- geometry_type == "GEOMETRYCOLLECTION"
+
+  pieces <- list()
+
+  if (any(line_rows)) {
+    pieces[[length(pieces) + 1]] <- x[line_rows, , drop = FALSE]
+  }
+
+  if (any(collection_rows)) {
+    extracted <- suppressWarnings(
+      st_collection_extract(
+        x[collection_rows, , drop = FALSE],
+        "LINESTRING",
+        warn = FALSE
+      )
+    )
+
+    if (nrow(extracted) > 0) {
+      pieces[[length(pieces) + 1]] <- extracted
+    }
+  }
+
+  if (length(pieces) == 0) {
+    return(x[0, , drop = FALSE])
+  }
+
+  out <- bind_rows(pieces)
+  out <- out[!st_is_empty(out), , drop = FALSE]
+
+  suppressWarnings(
+    st_cast(out, "LINESTRING", warn = FALSE)
+  )
+}
+
+write_gpkg_layer <- function(x, layer) {
+  st_write(
+    x,
+    dsn = OUT_GPKG,
+    layer = layer,
+    append = FALSE,
+    delete_layer = TRUE,
+    quiet = TRUE
+  )
+}
+
+scale_count_01 <- function(x, use_log = USE_LOG_SCALING) {
+  y <- if (use_log) log1p(as.numeric(x)) else as.numeric(x)
+  maximum <- max(y, na.rm = TRUE)
+
+  if (!is.finite(maximum) || maximum <= 0) {
+    return(rep(0, length(y)))
+  }
+
+  y / maximum
+}
+
+collapse_unique_nonblank <- function(x) {
+  x <- str_squish(as.character(x))
+  x <- x[!is.na(x) & nzchar(x)]
+
+  if (length(x) == 0) {
+    return(NA_character_)
+  }
+
+  paste(sort(unique(x)), collapse = ";")
+}
+
+
+# 4. Load EEZ and protection layers ---------------------------------------
+
+zone_eez <- st_read(
+  PROTECTION_GPKG,
+  layer = EEZ_LAYER,
+  quiet = TRUE
+) |>
+  exclude_sovereign_states() |>
+  make_valid_polygonal()
+
+ANALYSIS_CRS <- st_crs(zone_eez)
+
+zone_eez$eez_area_km2 <- sf_area_km2(zone_eez)
+
+zone_eez <- zone_eez |>
+  select(
+    sovereign_state,
+    eez_area_km2
+  )
+
+zone_mpa <- st_read(
+  PROTECTION_GPKG,
+  layer = MPA_LAYER,
+  quiet = TRUE
+) |>
+  st_transform(ANALYSIS_CRS) |>
+  exclude_sovereign_states() |>
+  make_valid_polygonal() |>
+  select(sovereign_state)
+
+zone_oecm <- st_read(
+  PROTECTION_GPKG,
+  layer = OECM_LAYER,
+  quiet = TRUE
+) |>
+  st_transform(ANALYSIS_CRS) |>
+  exclude_sovereign_states() |>
+  make_valid_polygonal() |>
+  select(sovereign_state)
+
+# The analysis footprint is the union of retained WIO EEZs.
+wio_eez_footprint <- st_sf(
+  geometry = st_union(st_geometry(zone_eez)),
+  crs = ANALYSIS_CRS
+) |>
+  make_valid_polygonal()
+
+
+# 5. Create mutually exclusive MPA/OECM zones -----------------------------
+
+create_exclusive_protection_zones <- function(eez_sf, mpa_sf, oecm_sf) {
+
+  results <- list()
+  k <- 1
+
+  for (country in eez_sf$sovereign_state) {
+
+    mpa_country <- mpa_sf |>
+      filter(sovereign_state == country)
+
+    oecm_country <- oecm_sf |>
+      filter(sovereign_state == country)
+
+    has_mpa <- nrow(mpa_country) > 0
+    has_oecm <- nrow(oecm_country) > 0
+
+    if (!has_mpa && !has_oecm) {
+      next
+    }
+
+    if (has_mpa) {
+      mpa_geom <- st_union(st_geometry(mpa_country))
+    }
+
+    if (has_oecm) {
+      oecm_geom <- st_union(st_geometry(oecm_country))
+    }
+
+    if (has_mpa && has_oecm) {
+      pieces <- list(
+        "MPA only" = suppressWarnings(
+          st_difference(mpa_geom, oecm_geom)
+        ),
+        "OECM only" = suppressWarnings(
+          st_difference(oecm_geom, mpa_geom)
+        ),
+        "MPA-OECM overlap" = suppressWarnings(
+          st_intersection(mpa_geom, oecm_geom)
+        )
+      )
+    } else if (has_mpa) {
+      pieces <- list("MPA only" = mpa_geom)
+    } else {
+      pieces <- list("OECM only" = oecm_geom)
+    }
+
+    for (category in names(pieces)) {
+
+      geometry <- pieces[[category]]
+
+      if (length(geometry) == 0 || all(st_is_empty(geometry))) {
+        next
+      }
+
+      temp <- st_sf(
+        sovereign_state = country,
+        protection_category = category,
+        geometry = geometry
+      ) |>
+        make_valid_polygonal()
+
+      if (nrow(temp) == 0) {
+        next
+      }
+
+      results[[k]] <- temp |>
+        group_by(
+          sovereign_state,
+          protection_category
+        ) |>
+        summarise(.groups = "drop") |>
+        make_valid_polygonal()
+
+      k <- k + 1
+    }
+  }
+
+  bind_rows(results)
+}
+
+protection_exclusive <- create_exclusive_protection_zones(
+  eez_sf = zone_eez,
+  mpa_sf = zone_mpa,
+  oecm_sf = zone_oecm
+)
+
+protection_exclusive$area_km2 <- sf_area_km2(protection_exclusive)
+
+write_gpkg_layer(
+  protection_exclusive,
+  "protection_exclusive_by_country"
+)
+
+
+# 6. Read and standardise MiCO crossing data -------------------------------
+
+mico_std <- read_csv(
+  MICO_CSV,
+  show_col_types = FALSE,
+  name_repair = "unique"
+) |>
+  mutate(
+    .line_type = str_to_upper(
+      str_squish(as.character(.data[[TYPE_FIELD]]))
+    )
+  ) |>
+  filter(.line_type %in% TYPE_VALUES) |>
+  transmute(
+    species_code = as.character(.data[[SPECIES_FIELD]]),
+    line_type = .line_type,
+    source_id = as.character(.data[[SOURCE_FIELD]]),
+    target_id = as.character(.data[[TARGET_FIELD]]),
+    start_x = suppressWarnings(as.numeric(.data[[START_X_FIELD]])),
+    start_y = suppressWarnings(as.numeric(.data[[START_Y_FIELD]])),
+    end_x = suppressWarnings(as.numeric(.data[[END_X_FIELD]])),
+    end_y = suppressWarnings(as.numeric(.data[[END_Y_FIELD]]))
+  ) |>
+  filter(
+    complete.cases(
+      species_code,
+      source_id,
+      target_id,
+      start_x,
+      start_y,
+      end_x,
+      end_y
+    )
+  )
+
+
+# 7. Aggregate to unique documented connections ---------------------------
+
+unique_connections <- mico_std |>
+  group_by(
+    species_code,
+    source_id,
+    target_id,
+    start_x,
+    start_y,
+    end_x,
+    end_y
+  ) |>
+  summarise(
+    line_types = collapse_unique_nonblank(line_type),
+    n_line_types = n_distinct(line_type, na.rm = TRUE),
+    has_metaroute = any(line_type == "METAROUTE", na.rm = TRUE),
+    has_metaconnection = any(line_type == "METACONNECTION", na.rm = TRUE),
+    source_export_rows = n(),
+    .groups = "drop"
+  ) |>
+  arrange(
+    species_code,
+    source_id,
+    target_id,
+    start_x,
+    start_y,
+    end_x,
+    end_y
+  ) |>
+  mutate(
+    connection_id = sprintf("CON%07d", row_number()),
+    geographic_connection_key = paste(
+      format(start_x, digits = 15, trim = TRUE),
+      format(start_y, digits = 15, trim = TRUE),
+      format(end_x, digits = 15, trim = TRUE),
+      format(end_y, digits = 15, trim = TRUE),
+      sep = "__"
+    )
+  ) |>
+  group_by(geographic_connection_key) |>
+  mutate(
+    geographic_connection_number = cur_group_id()
+  ) |>
+  ungroup() |>
+  mutate(
+    geographic_connection_id = sprintf(
+      "GC%07d",
+      geographic_connection_number
+    )
+  ) |>
+  filter(
+    source_id != target_id,
+    !(start_x == end_x & start_y == end_y)
+  ) |>
+  select(
+    connection_id,
+    geographic_connection_id,
+    species_code,
+    source_id,
+    target_id,
+    start_x,
+    start_y,
+    end_x,
+    end_y,
+    line_types,
+    n_line_types,
+    has_metaroute,
+    has_metaconnection,
+    source_export_rows
+  )
+
+write_csv(
+  unique_connections,
+  file.path(OUT_DIR, "mico_unique_connections_all.csv")
+)
+
+
+# 8. Build connection lines and clip to WIO EEZs --------------------------
+
+connection_geometries <- lapply(
+  seq_len(nrow(unique_connections)),
+  function(i) {
+    st_linestring(
+      matrix(
+        c(
+          unique_connections$start_x[[i]],
+          unique_connections$start_y[[i]],
+          unique_connections$end_x[[i]],
+          unique_connections$end_y[[i]]
+        ),
+        ncol = 2,
+        byrow = TRUE
+      )
+    )
+  }
+)
+
+connections_ll <- st_sf(
+  unique_connections,
+  geometry = st_sfc(
+    connection_geometries,
+    crs = MICO_COORD_CRS
+  )
+)
+
+st_geometry(connections_ll) <- lwgeom::st_geod_segmentize(
+  st_geometry(connections_ll),
+  max_seg_length = units::set_units(
+    GEODESIC_SEGMENT_KM,
+    "km",
+    mode = "standard"
+  )
+)
+
+connections_proj <- st_transform(
+  connections_ll,
+  ANALYSIS_CRS
+)
+
+hits_wio <- lengths(
+  st_intersects(
+    connections_proj,
+    wio_eez_footprint,
+    sparse = TRUE
+  )
+) > 0
+
+connections_touching_wio <- connections_proj[
+  hits_wio,
+  ,
+  drop = FALSE
+]
+
+connections_wio <- suppressWarnings(
+  st_intersection(
+    connections_touching_wio,
+    wio_eez_footprint
+  )
+) |>
+  extract_lineal()
+
+write_gpkg_layer(
+  connections_touching_wio,
+  "unique_connections_touching_wio"
+)
+
+write_gpkg_layer(
+  connections_wio,
+  "unique_connections_clipped_to_wio_eezs"
+)
+
+write_csv(
+  connections_touching_wio |>
+    st_drop_geometry() |>
+    distinct(connection_id, .keep_all = TRUE),
+  file.path(
+    OUT_DIR,
+    "mico_unique_connections_touching_wio.csv"
+  )
+)
+
+
+# 9. Create regular grid and split by EEZ ---------------------------------
+
+make_eez_grid <- function(eez_sf, grid_size_km) {
+
+  cell_m <- grid_size_km * 1000
+  bbox <- st_bbox(eez_sf)
+
+  origin <- c(
+    floor(as.numeric(bbox[["xmin"]]) / cell_m) * cell_m,
+    floor(as.numeric(bbox[["ymin"]]) / cell_m) * cell_m
+  )
+
+  grid_sfc <- st_make_grid(
+    eez_sf,
+    cellsize = c(cell_m, cell_m),
+    offset = origin,
+    what = "polygons",
+    square = TRUE
+  )
+
+  grid <- st_sf(
+    grid_id = sprintf("G%07d", seq_along(grid_sfc)),
+    geometry = grid_sfc,
+    crs = st_crs(eez_sf)
+  )
+
+  grid <- grid[
+    lengths(st_intersects(grid, eez_sf, sparse = TRUE)) > 0,
+    ,
+    drop = FALSE
+  ]
+
+  grid_eez <- suppressWarnings(
+    st_intersection(
+      grid,
+      eez_sf |>
+        select(sovereign_state)
+    )
+  ) |>
+    make_valid_polygonal() |>
+    group_by(
+      grid_id,
+      sovereign_state
+    ) |>
+    summarise(.groups = "drop") |>
+    make_valid_polygonal() |>
+    mutate(
+      cell_eez_id = paste(
+        grid_id,
+        sovereign_state,
+        sep = "__"
+      )
+    )
+
+  grid_eez$cell_area_km2 <- sf_area_km2(grid_eez)
+
+  grid_eez |>
+    select(
+      cell_eez_id,
+      grid_id,
+      sovereign_state,
+      cell_area_km2
+    )
+}
+
+grid_eez <- make_eez_grid(
+  eez_sf = zone_eez,
+  grid_size_km = GRID_SIZE_KM
+)
+
+write_gpkg_layer(
+  grid_eez,
+  "analysis_grid_all_eez_cells"
+)
+
+
+# 10. Score connectivity within each grid × EEZ cell ----------------------
+
+score_grid_connectivity <- function(grid_sf, connection_sf) {
+
+  hits <- st_intersects(
+    grid_sf,
+    connection_sf,
+    sparse = TRUE
+  )
+
+  n_cells <- nrow(grid_sf)
+
+  n_unique_connections <- integer(n_cells)
+  n_geographic_connections <- integer(n_cells)
+  n_species <- integer(n_cells)
+
+  for (i in seq_len(n_cells)) {
+
+    idx <- hits[[i]]
+
+    if (length(idx) == 0) {
+      next
+    }
+
+    connections <- connection_sf[idx, , drop = FALSE] |>
+      st_drop_geometry() |>
+      distinct(connection_id, .keep_all = TRUE)
+
+    n_unique_connections[[i]] <- nrow(connections)
+    n_geographic_connections[[i]] <- n_distinct(
+      connections$geographic_connection_id
+    )
+    n_species[[i]] <- n_distinct(
+      connections$species_code
+    )
+  }
+
+  grid_sf |>
+    mutate(
+      n_unique_connections = n_unique_connections,
+      n_geographic_connections = n_geographic_connections,
+      n_species = n_species
+    ) |>
+    # Only cells with documented MiCO connectivity enter Element 4.
+    filter(n_unique_connections > 0)
+}
+
+grid_scores <- score_grid_connectivity(
+  grid_sf = grid_eez,
+  connection_sf = connections_wio
+)
+
+
+# 11. Calculate the two-dimensional E4 score -------------------------------
+
+# C_i = number of unique documented connections in cell i
+# S_i = number of species represented in those connections
+#
+# E4_i = w_C * C*_i + w_S * S*_i
+#
+# Counts are optionally log1p-transformed before WIO-wide maximum
+# scaling to 0–1. Equal weights are used by default.
+
+grid_scores <- grid_scores |>
+  mutate(
+    connection_component = scale_count_01(
+      n_unique_connections
+    ),
+    species_component = scale_count_01(
+      n_species
+    ),
+    e4_score =
+      E4_WEIGHTS[["connections"]] * connection_component +
+      E4_WEIGHTS[["species"]] * species_component
+  )
+
+write_gpkg_layer(
+  grid_scores,
+  "connectivity_grid_scores_all"
+)
+
+write_csv(
+  grid_scores |>
+    st_drop_geometry(),
+  file.path(
+    OUT_DIR,
+    "connectivity_grid_scores_all.csv"
+  )
+)
+
+
+# 12. Calculate protection fractions within scored cells ------------------
+
+calculate_protection_fractions <- function(scored_grid, exclusive_zones) {
+
+  base <- scored_grid |>
+    select(
+      cell_eez_id,
+      grid_id,
+      sovereign_state,
+      cell_area_km2
+    )
+
+  categories <- c(
+    "MPA only",
+    "OECM only",
+    "MPA-OECM overlap"
+  )
+
+  area_results <- list()
+  k <- 1
+
+  for (category in categories) {
+
+    zone_category <- exclusive_zones |>
+      filter(protection_category == category) |>
+      select(
+        sovereign_state,
+        protection_category
+      )
+
+    if (nrow(zone_category) == 0) {
+      next
+    }
+
+    for (country in unique(base$sovereign_state)) {
+
+      cells_country <- base |>
+        filter(sovereign_state == country)
+
+      zone_country <- zone_category |>
+        filter(sovereign_state == country)
+
+      if (nrow(cells_country) == 0 || nrow(zone_country) == 0) {
+        next
+      }
+
+      intersection <- suppressWarnings(
+        st_intersection(
+          cells_country,
+          zone_country |>
+            select(protection_category)
+        )
+      ) |>
+        make_valid_polygonal()
+
+      if (nrow(intersection) == 0) {
+        next
+      }
+
+      intersection$protection_area_km2 <- sf_area_km2(intersection)
+
+      area_results[[k]] <- intersection |>
+        st_drop_geometry() |>
+        group_by(
+          cell_eez_id,
+          protection_category
+        ) |>
+        summarise(
+          protection_area_km2 = sum(
+            protection_area_km2,
+            na.rm = TRUE
+          ),
+          .groups = "drop"
+        )
+
+      k <- k + 1
+    }
+  }
+
+  if (length(area_results) == 0) {
+
+    protection_wide <- tibble(
+      cell_eez_id = base$cell_eez_id,
+      mpa_only_area_km2 = 0,
+      oecm_only_area_km2 = 0,
+      overlap_area_km2 = 0
+    )
+
+  } else {
+
+    protection_wide <- bind_rows(area_results) |>
+      complete(
+        cell_eez_id = base$cell_eez_id,
+        protection_category = categories,
+        fill = list(protection_area_km2 = 0)
+      ) |>
+      pivot_wider(
+        names_from = protection_category,
+        values_from = protection_area_km2,
+        values_fill = 0
+      ) |>
+      rename(
+        mpa_only_area_km2 = `MPA only`,
+        oecm_only_area_km2 = `OECM only`,
+        overlap_area_km2 = `MPA-OECM overlap`
+      )
+  }
+
+  scored_grid |>
+    left_join(
+      protection_wide,
+      by = "cell_eez_id"
+    ) |>
+    mutate(
+      across(
+        c(
+          mpa_only_area_km2,
+          oecm_only_area_km2,
+          overlap_area_km2
+        ),
+        ~ replace_na(.x, 0)
+      ),
+      protected_area_km2 =
+        mpa_only_area_km2 +
+        oecm_only_area_km2 +
+        overlap_area_km2,
+      unprotected_area_km2 = pmax(
+        0,
+        cell_area_km2 - protected_area_km2
+      ),
+      frac_mpa_only = safe_divide(
+        mpa_only_area_km2,
+        cell_area_km2
+      ),
+      frac_oecm_only = safe_divide(
+        oecm_only_area_km2,
+        cell_area_km2
+      ),
+      frac_overlap = safe_divide(
+        overlap_area_km2,
+        cell_area_km2
+      ),
+      frac_protected = safe_divide(
+        protected_area_km2,
+        cell_area_km2
+      ),
+      frac_unprotected = safe_divide(
+        unprotected_area_km2,
+        cell_area_km2
+      )
+    )
+}
+
+grid_scores <- calculate_protection_fractions(
+  scored_grid = grid_scores,
+  exclusive_zones = protection_exclusive
+)
+
+write_gpkg_layer(
+  grid_scores,
+  "connectivity_grid_scores_with_protection"
+)
+
+write_csv(
+  grid_scores |>
+    st_drop_geometry(),
+  file.path(
+    OUT_DIR,
+    "connectivity_grid_scores_with_protection.csv"
+  )
+)
+
+
+# 13. Inventory documented connections by EEZ -----------------------------
+
+summarise_connection_inventory <- function(eez_sf, connection_sf) {
+
+  country_results <- lapply(
+    seq_len(nrow(eez_sf)),
+    function(i) {
+
+      country <- eez_sf$sovereign_state[[i]]
+
+      idx <- st_intersects(
+        eez_sf[i, , drop = FALSE],
+        connection_sf,
+        sparse = TRUE
+      )[[1]]
+
+      if (length(idx) == 0) {
+        return(
+          tibble(
+            sovereign_state = country,
+            n_unique_connections_in_eez = 0L,
+            n_geographic_connections_in_eez = 0L,
+            n_species_with_connections_in_eez = 0L
+          )
+        )
+      }
+
+      data <- connection_sf[idx, , drop = FALSE] |>
+        st_drop_geometry() |>
+        distinct(connection_id, .keep_all = TRUE)
+
+      tibble(
+        sovereign_state = country,
+        n_unique_connections_in_eez = nrow(data),
+        n_geographic_connections_in_eez = n_distinct(
+          data$geographic_connection_id
+        ),
+        n_species_with_connections_in_eez = n_distinct(
+          data$species_code
+        )
+      )
+    }
+  ) |>
+    bind_rows()
+
+  wio_data <- connection_sf |>
+    st_drop_geometry() |>
+    distinct(connection_id, .keep_all = TRUE)
+
+  wio_row <- tibble(
+    sovereign_state = "WIO",
+    n_unique_connections_in_eez = nrow(wio_data),
+    n_geographic_connections_in_eez = n_distinct(
+      wio_data$geographic_connection_id
+    ),
+    n_species_with_connections_in_eez = n_distinct(
+      wio_data$species_code
+    )
+  )
+
+  bind_rows(
+    country_results,
+    wio_row
+  )
+}
+
+connection_inventory <- summarise_connection_inventory(
+  eez_sf = zone_eez,
+  connection_sf = connections_wio
+)
+
+write_csv(
+  connection_inventory,
+  file.path(
+    OUT_DIR,
+    "mico_unique_connection_inventory_by_eez.csv"
+  )
+)
+
+
+# 14. Summarise protection by connectivity score --------------------------
+
+summarise_protection_by_score <- function(
+    scored_grid,
+    score_col,
+    score_type,
+    selection) {
+
+  data <- scored_grid |>
+    st_drop_geometry()
+
+  summarise_one <- function(x, sovereign_name) {
+
+    score <- x[[score_col]]
+
+    tibble(
+      sovereign_state = sovereign_name,
+      selection = selection,
+      score_type = score_type,
+      grid_size_km = GRID_SIZE_KM,
+
+      n_connectivity_cells = nrow(x),
+
+      connectivity_cell_area_km2 =
+        sum(x$cell_area_km2, na.rm = TRUE),
+
+      protected_connectivity_cell_area_km2 =
+        sum(x$protected_area_km2, na.rm = TRUE),
+
+      mpa_only_connectivity_cell_area_km2 =
+        sum(x$mpa_only_area_km2, na.rm = TRUE),
+
+      oecm_only_connectivity_cell_area_km2 =
+        sum(x$oecm_only_area_km2, na.rm = TRUE),
+
+      overlap_connectivity_cell_area_km2 =
+        sum(x$overlap_area_km2, na.rm = TRUE),
+
+      unprotected_connectivity_cell_area_km2 =
+        sum(x$unprotected_area_km2, na.rm = TRUE),
+
+      raw_score_sum =
+        sum(score, na.rm = TRUE),
+
+      score_area_total =
+        sum(score * x$cell_area_km2, na.rm = TRUE),
+
+      score_area_protected =
+        sum(score * x$protected_area_km2, na.rm = TRUE),
+
+      score_area_mpa_only =
+        sum(score * x$mpa_only_area_km2, na.rm = TRUE),
+
+      score_area_oecm_only =
+        sum(score * x$oecm_only_area_km2, na.rm = TRUE),
+
+      score_area_overlap =
+        sum(score * x$overlap_area_km2, na.rm = TRUE),
+
+      score_area_unprotected =
+        sum(score * x$unprotected_area_km2, na.rm = TRUE)
+    ) |>
+      mutate(
+        # MPA and OECM totals include their shared overlap.
+        score_area_mpa =
+          score_area_mpa_only + score_area_overlap,
+
+        score_area_oecm =
+          score_area_oecm_only + score_area_overlap,
+
+        percent_connectivity_cell_area_protected =
+          100 * safe_divide(
+            protected_connectivity_cell_area_km2,
+            connectivity_cell_area_km2
+          ),
+
+        percent_connectivity_cell_area_mpa_only =
+          100 * safe_divide(
+            mpa_only_connectivity_cell_area_km2,
+            connectivity_cell_area_km2
+          ),
+
+        percent_connectivity_cell_area_oecm_only =
+          100 * safe_divide(
+            oecm_only_connectivity_cell_area_km2,
+            connectivity_cell_area_km2
+          ),
+
+        percent_connectivity_cell_area_overlap =
+          100 * safe_divide(
+            overlap_connectivity_cell_area_km2,
+            connectivity_cell_area_km2
+          ),
+
+        percent_score_weighted_area_protected =
+          100 * safe_divide(
+            score_area_protected,
+            score_area_total
+          ),
+
+        percent_score_weighted_area_mpa =
+          100 * safe_divide(
+            score_area_mpa,
+            score_area_total
+          ),
+
+        percent_score_weighted_area_oecm =
+          100 * safe_divide(
+            score_area_oecm,
+            score_area_total
+          ),
+
+        percent_score_weighted_area_mpa_only =
+          100 * safe_divide(
+            score_area_mpa_only,
+            score_area_total
+          ),
+
+        percent_score_weighted_area_oecm_only =
+          100 * safe_divide(
+            score_area_oecm_only,
+            score_area_total
+          ),
+
+        percent_score_weighted_area_overlap =
+          100 * safe_divide(
+            score_area_overlap,
+            score_area_total
+          ),
+
+        percent_score_weighted_area_unprotected =
+          100 * safe_divide(
+            score_area_unprotected,
+            score_area_total
+          )
+      )
+  }
+
+  country_rows <- lapply(
+    zone_eez$sovereign_state,
+    function(country) {
+      summarise_one(
+        x = data |>
+          filter(sovereign_state == country),
+        sovereign_name = country
+      )
+    }
+  ) |>
+    bind_rows()
+
+  wio_row <- summarise_one(
+    x = data,
+    sovereign_name = "WIO"
+  )
+
+  bind_rows(
+    country_rows,
+    wio_row
+  )
+}
+
+
+# 15. Export connectivity-representation summaries ------------------------
+
+# The unique-connection intensity summary is retained as an alternative
+# metric. The two-dimensional E4 score is the main Element 4
+# result used for ecological representativeness.
+
+connection_intensity_summary <- summarise_protection_by_score(
+  scored_grid = grid_scores,
+  score_col = "n_unique_connections",
+  score_type = "unique_connection_intensity",
+  selection = "all_documented_connectivity_cells"
+)
+
+e4_summary <- summarise_protection_by_score(
+  scored_grid = grid_scores,
+  score_col = "e4_score",
+  score_type = "two_dimensional_e4_score",
+  selection = "all_documented_connectivity_cells"
+)
+
+final_summary <- bind_rows(
+  connection_intensity_summary,
+  e4_summary
+) |>
+  arrange(
+    score_type,
+    sovereign_state
+  )
+
+write_csv(
+  final_summary,
+  file.path(
+    OUT_DIR,
+    "element4_connectivity_protection_by_eez.csv"
+  )
+)
+
+write_csv(
+  e4_summary,
+  file.path(
+    OUT_DIR,
+    "element4_e4_protection_by_eez.csv"
+  )
+)
+
+
+# 16. Complete -------------------------------------------------------------
+
+message(
+  "Element 4 analysis complete. Outputs written to: ",
+  normalizePath(OUT_DIR)
+)
