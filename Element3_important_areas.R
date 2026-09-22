@@ -52,19 +52,6 @@
 #   and q75 selections and is the geometry tested against the
 #   filtered MPA and OECM footprints.
 #
-#   Default:
-#
-#     8 km grid-cell width
-#     -> 4 km protection buffer radius
-#
-#   A key corridor is classified as:
-#
-#     MPA only          = buffer intersects MPA but not OECM
-#     OECM only         = buffer intersects OECM but not MPA
-#     MPA-OECM overlap  = buffer intersects BOTH
-#     Unprotected       = buffer intersects neither
-#
-# The final q75 > can be changed to >= with one setting below.
 #
 # IMPORTANT:
 # The WIO regional row is the sum of the country-selected key
@@ -259,10 +246,6 @@ indicator_inputs <-
     # --------------------------------------------------------
     # ECOLOGICALLY OR BIOLOGICALLY SIGNIFICANT MARINE AREAS
     # --------------------------------------------------------
-    #
-    # Replace this path with the actual EBSA file.
-    # Change enabled to TRUE when the path is correct.
-    # --------------------------------------------------------
     
     "indicators/EBSA_combined.gpkg",
     NA_character_,
@@ -287,32 +270,6 @@ indicator_inputs <-
     NA_character_,
     TRUE,
     
-    
-    # --------------------------------------------------------
-    # MARINE MIGRATION CORRIDORS
-    # --------------------------------------------------------
-    #
-    # Dataset not yet available.
-    #
-    # Once available:
-    #
-    #   1. replace the path
-    #   2. choose measure_type = "area" or "points"
-    #   3. set enabled = TRUE
-    #
-    # --------------------------------------------------------
-    
-    "CHANGE_ME/marine_migration_corridors.shp",
-    NA_character_,
-    "Marine Migration Corridors",
-    "vector",
-    "auto",
-    "none",
-    NA_character_,
-    FALSE
-  )
-
-
 
 # Assign ONLY if an indicator genuinely has missing CRS metadata.
 SOURCE_INDICATOR_CRS_IF_MISSING <-
@@ -323,12 +280,6 @@ SOURCE_INDICATOR_CRS_IF_MISSING <-
 # ------------------------------------------------------------
 # 2d. Larval corridor settings
 # ------------------------------------------------------------
-#
-# These names follow the source code you supplied.
-#
-# If the actual shapefile uses slightly different field names,
-# change ONLY these settings.
-# ------------------------------------------------------------
 
 LARVAL_INFLOW_FIELD <-
   "InflowP5"
@@ -338,9 +289,6 @@ LARVAL_OUTFLOW_FIELD <-
   "OutflowP5"
 
 
-# Reef/grid identifier used in the historical code.
-# This is retained for QA so row counts can be compared with
-# unique source-grid counts.
 LARVAL_ID_FIELD <-
   "ID_2"
 
@@ -349,16 +297,6 @@ LARVAL_INFLOW_QUANTILE <-
   0.75
 
 
-# The historical code used:
-#
-#   InflowP5 > quantile(InflowP5, 0.75)
-#
-# FALSE reproduces that strict ">" rule.
-#
-# TRUE changes it to:
-#
-#   InflowP5 >= q75
-#
 LARVAL_QUANTILE_INCLUSIVE <-
   FALSE
 
@@ -376,12 +314,7 @@ LARVAL_REQUIRE_POSITIVE_OUTFLOW <-
 # ------------------------------------------------------------
 #
 # The connectivity point is the centroid of an ~8 km grid cell.
-#
-# For protection, use a circular buffer around the centroid.
 # Default radius = half the cell width = 4 km.
-#
-# If the original connectivity workflow used a different distance,
-# change LARVAL_PROTECTION_BUFFER_KM only.
 # ------------------------------------------------------------
 
 LARVAL_GRID_CELL_WIDTH_KM <-
@@ -395,13 +328,6 @@ LARVAL_PROTECTION_BUFFER_KM <-
 
 # ------------------------------------------------------------
 # 2f. Polygon memory settings
-# ------------------------------------------------------------
-#
-# Indicator polygons are processed one country at a time and in
-# batches before being dissolved.
-#
-# Lower this if a particularly large KBA / IBA / EBSA dataset
-# causes memory pressure.
 # ------------------------------------------------------------
 
 VECTOR_BATCH_SIZE <-
@@ -2583,30 +2509,6 @@ area_composition_from_country_indicator <- function(
 # ============================================================
 # 10. LARVAL GRID-CELL PREPARATION
 # ============================================================
-#
-# IMPORTANT:
-#
-# The source connectivity layer contains POINT CENTROIDS for
-# approximately 8 km grid cells.
-#
-# We create the 4 km-radius grid-cell approximation immediately,
-# BEFORE corridor filtering and BEFORE the country-specific q75
-# calculation.
-#
-# Two linked sf objects are returned:
-#
-#   centroids
-#       Active geometry = original connectivity point.
-#       Used ONLY to assign each grid cell to one sovereign EEZ.
-#
-#   buffers
-#       Active geometry = 4 km-radius buffer.
-#       Used for MPA/OECM protection intersection.
-#
-# Both objects share .point_id, so selections made from the centroid
-# attributes are transferred exactly to the corresponding buffer.
-# ============================================================
-
 
 prepare_larval_grid_cells <- function(
     point_sf) {
@@ -2618,8 +2520,6 @@ prepare_larval_grid_cells <- function(
     )
   
   
-  # Protect the analysis ID field if the source unexpectedly
-  # already contains one.
   if (
     ".point_id" %in%
     names(
@@ -2691,7 +2591,6 @@ assign_points_to_eez <- function(
     )
   
   
-  # Protect analysis field names from source-data collisions.
   if (
     "sovereign_state" %in%
     names(
@@ -2711,9 +2610,6 @@ assign_points_to_eez <- function(
   }
   
   
-  # If .point_id was already created during larval grid-cell
-  # preparation, preserve it so the centroid and its 4 km buffer
-  # remain linked. Other point indicators receive an ID here.
   if (
     !(
       ".point_id" %in%
@@ -2748,8 +2644,6 @@ assign_points_to_eez <- function(
     )
   
   
-  # A boundary point can theoretically match multiple EEZs.
-  # Keep one row per point x sovereign state.
   joined |>
     dplyr::distinct(
       .point_id,
@@ -2759,19 +2653,6 @@ assign_points_to_eez <- function(
 }
 
 
-
-
-
-# ------------------------------------------------------------
-# Attach centroid-derived sovereign ownership to grid buffers
-# ------------------------------------------------------------
-#
-# We deliberately DO NOT intersect the buffers with EEZs to assign
-# sovereign state. A buffer near an EEZ boundary may cross more than
-# one EEZ and would otherwise be duplicated.
-#
-# Ownership comes from the centroid; protection comes from the buffer.
-# ------------------------------------------------------------
 
 attach_centroid_eez_to_buffers <- function(
     buffer_sf,
@@ -2873,13 +2754,6 @@ apply_larval_country_q75 <- function(
   
   # ----------------------------------------------------------
   # STEP 1: define ANY dispersal corridor
-  #
-  # Historical code:
-  #
-  # EEZ_CON_Cor <- EEZ_CON |>
-  #   filter(OutflowP5 > 0 & InflowP5 > 0)
-  #
-  # Therefore q75 must be calculated from THIS corridor subset.
   # ----------------------------------------------------------
   
   corridor_points <-
@@ -2897,8 +2771,6 @@ apply_larval_country_q75 <- function(
         0
     )
   
-  
-  # Counts of all source connectivity points per EEZ.
   all_country_counts <-
     x |>
     sf::st_drop_geometry() |>
@@ -3157,44 +3029,10 @@ apply_larval_country_q75 <- function(
 # ============================================================
 # 13. POINT INDICATOR: CLASSIFY PROTECTION
 # ============================================================
-#
-# A point exactly on a polygon boundary can technically intersect
-# more than one exclusive geometry because boundaries are shared.
-#
-# To prevent double-counting, category priority is:
-#
-#   1. MPA-OECM overlap
-#   2. MPA only
-#   3. OECM only
-#
-# Each point x sovereign state therefore receives at most ONE
-# protected category.
-# ============================================================
-
 
 classify_points_protection <- function(
     points_by_country,
     protection_test_sf = NULL) {
-  
-  
-  # ----------------------------------------------------------
-  # Denominator versus protection-test geometry
-  # ----------------------------------------------------------
-  #
-  # points_by_country:
-  #     centroid point set defining the indicator denominator.
-  #
-  # protection_test_sf:
-  #     geometry used to test protection.
-  #
-  # For turtle nests:
-  #     protection_test_sf = NULL
-  #     -> test the nest points themselves.
-  #
-  # For larval corridors:
-  #     protection_test_sf = pre-created 4 km buffers
-  #     -> test the represented grid-cell footprint.
-  # ----------------------------------------------------------
   
   if (
     is.null(
@@ -3286,8 +3124,6 @@ classify_points_protection <- function(
       )
     
     
-    # Keep only protection-test geometries corresponding exactly
-    # to the denominator points for this indicator/country.
     test_country <-
       test_country |>
       dplyr::semi_join(
@@ -3336,8 +3172,7 @@ classify_points_protection <- function(
       )
     }
     
-    
-    # Ensure test geometry is ordered exactly like denominator IDs.
+
     test_country <-
       test_country[
         match(
@@ -4473,8 +4308,6 @@ process_one_indicator <- function(j) {
         larval_grid$buffers
       
       
-      # Save the source grid-cell approximation immediately,
-      # before EEZ assignment or corridor filtering.
       if (
         file.exists(
           spatial_cache_gpkg
@@ -4498,7 +4331,6 @@ process_one_indicator <- function(j) {
       )
       
       
-      # Assign sovereign ownership using CENTROIDS only.
       points_by_country <-
         timer(
           
@@ -4513,8 +4345,6 @@ process_one_indicator <- function(j) {
         )
       
       
-      # Attach that centroid-derived country to the PRE-CREATED
-      # buffers. The buffer itself is never used to assign EEZ.
       buffers_by_country <-
         attach_centroid_eez_to_buffers(
           buffer_sf =
@@ -4575,8 +4405,6 @@ process_one_indicator <- function(j) {
         larval_result$corridor_points
       
       
-      # Subset the PRE-CREATED buffers using exactly the same
-      # .point_id selections made from the centroid attributes.
       corridor_buffers <-
         buffers_by_country |>
         dplyr::semi_join(
@@ -4671,10 +4499,6 @@ process_one_indicator <- function(j) {
       )
       
       
-      # Denominator = key corridor GRID CELLS represented by
-      # their centroids.
-      #
-      # Protection test = corresponding PRE-CREATED 4 km buffers.
       out <-
         build_point_output(
           points_by_country =
@@ -4705,10 +4529,6 @@ process_one_indicator <- function(j) {
       )
       
       
-      # --------------------------------------------------------
-      # ORDINARY POINT INDICATORS:
-      # e.g. turtle nesting sites
-      # --------------------------------------------------------
       
     } else if (
       filter_mode ==
@@ -4768,7 +4588,6 @@ process_one_indicator <- function(j) {
       )
       
       
-      # True point-in-polygon test: no buffer.
       out <-
         build_point_output(
           points_by_country =
@@ -4943,11 +4762,6 @@ process_one_indicator <- function(j) {
 # ============================================================
 # 18. RUN INDICATORS SEQUENTIALLY
 # ============================================================
-#
-# Sequential execution is deliberate. Polygon intersections can
-# be memory intensive and there is little benefit in making several
-# large sf operations compete for RAM.
-# ============================================================
 
 
 indicator_results <-
@@ -5003,14 +4817,6 @@ country_summary <-
 
 # ============================================================
 # 20. ADD WIO REGIONAL ROW
-# ============================================================
-#
-# Country percentages are NOT averaged.
-#
-# For the larval indicator, the point set entering this calculation
-# has already been selected using EACH COUNTRY'S OWN q75.
-#
-# The WIO row therefore sums those country-selected points.
 # ============================================================
 
 
@@ -5417,359 +5223,6 @@ readr::write_csv(
   composition_long,
   composition_long_csv
 )
-
-
-
-# ============================================================
-# 22. STACKED-BAR PLOTS
-# ============================================================
-
-
-for (
-  indicator_name in
-  unique(
-    composition_long$indicator
-  )
-) {
-  
-  
-  plot_data <-
-    composition_long |>
-    dplyr::filter(
-      indicator ==
-        indicator_name,
-      sovereign_state !=
-        "WIO"
-    )
-  
-  
-  observed_countries <-
-    unique(
-      plot_data$sovereign_state
-    )
-  
-  
-  country_levels <-
-    c(
-      
-      intersect(
-        COUNTRY_ORDER,
-        observed_countries
-      ),
-      
-      setdiff(
-        sort(
-          observed_countries
-        ),
-        COUNTRY_ORDER
-      )
-    )
-  
-  
-  plot_data <-
-    plot_data |>
-    dplyr::mutate(
-      sovereign_state =
-        factor(
-          sovereign_state,
-          levels =
-            rev(
-              country_levels
-            )
-        )
-    )
-  
-  
-  p <-
-    ggplot2::ggplot(
-      plot_data,
-      ggplot2::aes(
-        x =
-          sovereign_state,
-        y =
-          percent_indicator,
-        fill =
-          protection_category
-      )
-    ) +
-    ggplot2::geom_col() +
-    ggplot2::coord_flip() +
-    ggplot2::labs(
-      title =
-        paste0(
-          indicator_name,
-          ": protection composition"
-        ),
-      subtitle =
-        "Stack height = total protected proportion; MPA/OECM overlap counted once",
-      x =
-        NULL,
-      y =
-        "Proportion of indicator protected (%)",
-      fill =
-        "Protection category"
-    ) +
-    ggplot2::theme_minimal()
-  
-  
-  ggplot2::ggsave(
-    
-    filename =
-      file.path(
-        plot_dir,
-        paste0(
-          clean_filename(
-            indicator_name
-          ),
-          "_protection_composition.png"
-        )
-      ),
-    
-    plot =
-      p,
-    
-    width =
-      10,
-    
-    height =
-      7,
-    
-    dpi =
-      300
-  )
-}
-
-
-
-# Combined faceted plot.
-facet_data <-
-  composition_long |>
-  dplyr::filter(
-    sovereign_state !=
-      "WIO"
-  )
-
-
-
-facet_plot <-
-  ggplot2::ggplot(
-    facet_data,
-    ggplot2::aes(
-      x =
-        sovereign_state,
-      y =
-        percent_indicator,
-      fill =
-        protection_category
-    )
-  ) +
-  ggplot2::geom_col() +
-  ggplot2::coord_flip() +
-  ggplot2::facet_wrap(
-    ~ indicator,
-    scales =
-      "free_y"
-  ) +
-  ggplot2::labs(
-    title =
-      "Element 3 protection composition",
-    subtitle =
-      "MPA only + OECM only + overlap = total protected proportion",
-    x =
-      NULL,
-    y =
-      "Proportion of indicator protected (%)",
-    fill =
-      "Protection category"
-  ) +
-  ggplot2::theme_minimal()
-
-
-
-ggplot2::ggsave(
-  
-  filename =
-    file.path(
-      plot_dir,
-      "element3_all_indicators_protection_composition.png"
-    ),
-  
-  plot =
-    facet_plot,
-  
-  width =
-    15,
-  
-  height =
-    10,
-  
-  dpi =
-    300
-)
-
-
-
-# ============================================================
-# 23. QA CHECKS
-# ============================================================
-
-
-message(
-  "\nRunning Element 3 QA checks..."
-)
-
-
-
-# ------------------------------------------------------------
-# Exclusive components reproduce total protection
-# ------------------------------------------------------------
-
-qa_partition <-
-  final_summary |>
-  dplyr::filter(
-    sovereign_state !=
-      "WIO"
-  ) |>
-  dplyr::mutate(
-    
-    area_component_sum =
-      mpa_only_indicator_area_km2 +
-      oecm_only_indicator_area_km2 +
-      overlap_indicator_area_km2,
-    
-    
-    point_component_sum =
-      mpa_only_indicator_point_count +
-      oecm_only_indicator_point_count +
-      overlap_indicator_point_count
-  ) |>
-  dplyr::filter(
-    
-    (
-      measure_type ==
-        "area" &
-        abs(
-          protected_indicator_area_km2 -
-            area_component_sum
-        ) >
-        0.001
-    ) |
-      
-      (
-        measure_type ==
-          "points" &
-          protected_indicator_point_count !=
-          point_component_sum
-      )
-  )
-
-
-
-if (
-  nrow(
-    qa_partition
-  ) >
-  0
-) {
-  
-  warning(
-    "Exclusive protection components do not reproduce total protection for some rows."
-  )
-  
-  
-  print(
-    qa_partition
-  )
-}
-
-
-
-# ------------------------------------------------------------
-# Protected indicator cannot exceed total indicator
-# ------------------------------------------------------------
-
-qa_exceeds_total <-
-  final_summary |>
-  dplyr::filter(
-    sovereign_state !=
-      "WIO"
-  ) |>
-  dplyr::filter(
-    
-    (
-      measure_type ==
-        "area" &
-        protected_indicator_area_km2 >
-        indicator_area_km2 +
-        0.001
-    ) |
-      
-      (
-        measure_type ==
-          "points" &
-          protected_indicator_point_count >
-          indicator_point_count
-      )
-  )
-
-
-
-if (
-  nrow(
-    qa_exceeds_total
-  ) >
-  0
-) {
-  
-  warning(
-    "Protected indicator amount exceeds total indicator amount for some rows."
-  )
-  
-  
-  print(
-    qa_exceeds_total
-  )
-}
-
-
-
-# ------------------------------------------------------------
-# Percent protected should remain 0-100
-# ------------------------------------------------------------
-
-qa_percentage <-
-  final_summary |>
-  dplyr::filter(
-    
-    !is.na(
-      percent_indicator_protected_total
-    ),
-    
-    percent_indicator_protected_total <
-      -0.001 |
-      
-      percent_indicator_protected_total >
-      100.001
-  )
-
-
-
-if (
-  nrow(
-    qa_percentage
-  ) >
-  0
-) {
-  
-  warning(
-    "Some Element 3 protection percentages fall outside 0-100."
-  )
-  
-  
-  print(
-    qa_percentage
-  )
-}
 
 
 
