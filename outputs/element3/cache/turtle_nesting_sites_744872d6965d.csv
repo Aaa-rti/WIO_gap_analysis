@@ -1,0 +1,11 @@
+sovereign_state,indicator,data_type,measure_type,filter_mode,filter_expr_applied,eez_area_km2,indicator_area_km2,indicator_point_count,protected_indicator_area_km2,protected_indicator_point_count,mpa_indicator_area_km2,oecm_indicator_area_km2,mpa_indicator_point_count,oecm_indicator_point_count,mpa_only_indicator_area_km2,oecm_only_indicator_area_km2,overlap_indicator_area_km2,mpa_only_indicator_point_count,oecm_only_indicator_point_count,overlap_indicator_point_count,indicator_total_in_all_eezs_km2,indicator_total_points_in_all_eezs,percent_eez_covered_by_indicator,percent_of_indicator_in_all_eezs,percent_indicator_protected_total,percent_indicator_protected_mpa,percent_indicator_protected_oecm,percent_indicator_protected_mpa_only,percent_indicator_protected_oecm_only,percent_indicator_protected_overlap
+Comoro Islands,Turtle Nesting Sites,vector,points,none,NA,164653.96314140054,NA,73,NA,0,NA,NA,0,0,NA,NA,NA,0,0,0,NA,584,NA,12.5,0,0,0,0,0,0
+France,Turtle Nesting Sites,vector,points,none,NA,1000794.8274630557,NA,73,NA,0,NA,NA,0,0,NA,NA,NA,0,0,0,NA,584,NA,12.5,0,0,0,0,0,0
+Kenya,Turtle Nesting Sites,vector,points,none,NA,111678.9158801631,NA,73,NA,18,NA,NA,18,0,NA,NA,NA,18,0,0,NA,584,NA,12.5,24.65753424657534,24.65753424657534,0,24.65753424657534,0,0
+Madagascar,Turtle Nesting Sites,vector,points,none,NA,1199947.515748097,NA,73,NA,4,NA,NA,4,0,NA,NA,NA,4,0,0,NA,584,NA,12.5,5.47945205479452,5.47945205479452,0,5.47945205479452,0,0
+Mauritius,Turtle Nesting Sites,vector,points,none,NA,1272770.4275330903,NA,0,NA,0,NA,NA,0,0,NA,NA,NA,0,0,0,NA,584,NA,12.5,NA,NA,NA,NA,NA,NA
+Mozambique,Turtle Nesting Sites,vector,points,none,NA,571514.8887434019,NA,73,NA,8,NA,NA,8,0,NA,NA,NA,8,0,0,NA,584,NA,12.5,10.95890410958904,10.95890410958904,0,10.95890410958904,0,0
+Seychelles,Turtle Nesting Sites,vector,points,none,NA,1331965.2695336612,NA,73,NA,6,NA,NA,6,0,NA,NA,NA,6,0,0,NA,584,NA,12.5,8.21917808219178,8.21917808219178,0,8.21917808219178,0,0
+Somalia,Turtle Nesting Sites,vector,points,none,NA,779443.0223366382,NA,0,NA,0,NA,NA,0,0,NA,NA,NA,0,0,0,NA,584,NA,12.5,NA,NA,NA,NA,NA,NA
+South Africa,Turtle Nesting Sites,vector,points,none,NA,1066572.2965040684,NA,73,NA,0,NA,NA,0,0,NA,NA,NA,0,0,0,NA,584,NA,12.5,0,0,0,0,0,0
+Tanzania,Turtle Nesting Sites,vector,points,none,NA,241551.6188809028,NA,73,NA,0,NA,NA,0,0,NA,NA,NA,0,0,0,NA,584,NA,12.5,0,0,0,0,0,0

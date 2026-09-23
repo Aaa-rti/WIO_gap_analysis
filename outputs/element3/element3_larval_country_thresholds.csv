@@ -1,0 +1,11 @@
+sovereign_state,n_connectivity_points_in_eez,n_valid_inflow,n_valid_outflow,inflow_q75_corridors,n_dispersal_corridors,n_unique_corridor_ids,n_key_corridor_points,n_unique_key_corridor_ids,quantile_probability,quantile_population,quantile_rule,inflow_field,outflow_field,source_id_field,grid_cell_width_km,protection_buffer_km
+Comoro Islands,20,20,20,1757,20,NA,5,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
+France,54,54,54,1845.5,54,NA,14,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
+Kenya,28,28,28,2199,27,NA,7,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
+Madagascar,233,233,233,1962,196,NA,49,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
+Mauritius,36,36,36,891,34,NA,9,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
+Mozambique,113,113,113,2410,110,NA,28,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
+Seychelles,100,100,100,921.5,98,NA,25,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
+Somalia,26,26,26,1530.5,22,NA,6,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
+South Africa,1,1,1,714,1,NA,0,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
+Tanzania,136,136,136,3523.5,136,NA,34,NA,0.75,dispersal corridors only: InflowP5 > 0 and OutflowP5 > 0,>,InflowP5,OutflowP5,ID_2,8,4
