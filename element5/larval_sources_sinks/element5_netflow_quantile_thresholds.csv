@@ -1,0 +1,12 @@
+sovereign_state,n_cells,q25_netflow,q75_netflow,threshold_scope
+Comoro Islands,20,-0.13337417475,0.00159748275,country-specific
+France,54,-0.31484398975,0.4384915245,country-specific
+Kenya,27,-0.1251549685,0.5619012225,country-specific
+Madagascar,199,-0.174266899,0.28266797099999996,country-specific
+Mauritius,34,-0.18728244825,0.07015758125,country-specific
+Mozambique,110,-0.031222615250000002,0.30777515725,country-specific
+Seychelles,100,-0.1249321165,0.322399054,country-specific
+Somalia,22,-0.24193630225,0.24891961025,country-specific
+South Africa,1,0.170653907,0.170653907,country-specific
+Tanzania,136,-0.21795509625000004,0.34407915125,country-specific
+WIO,703,-0.17715154249999998,0.305316173,WIO-wide
